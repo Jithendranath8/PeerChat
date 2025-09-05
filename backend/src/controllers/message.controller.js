@@ -9,7 +9,69 @@ export const getUsersForSidebar = async (req, res) => {
     const loggedInUserId = req.user._id;
     const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
 
-    res.status(200).json(filteredUsers);
+    // compute unread counts per user
+    const unreadCounts = await Message.aggregate([
+      {
+        $match: { receiverId: loggedInUserId, read: false },
+      },
+      {
+        $group: { _id: "$senderId", count: { $sum: 1 } },
+      },
+    ]);
+
+    const senderIdToCount = unreadCounts.reduce((acc, cur) => {
+      acc[cur._id.toString()] = cur.count;
+      return acc;
+    }, {});
+
+    // compute last message time between logged-in user and each contact
+    const lastMessageTimes = await Message.aggregate([
+      {
+        $match: {
+          $or: [
+            { senderId: loggedInUserId },
+            { receiverId: loggedInUserId },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          otherUserId: {
+            $cond: [
+              { $eq: ["$senderId", loggedInUserId] },
+              "$receiverId",
+              "$senderId",
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$otherUserId",
+          lastMessageAt: { $max: "$createdAt" },
+        },
+      },
+    ]);
+
+    const userIdToLastMessageAt = lastMessageTimes.reduce((acc, cur) => {
+      acc[cur._id.toString()] = cur.lastMessageAt;
+      return acc;
+    }, {});
+
+    const usersWithMeta = filteredUsers.map((u) => ({
+      ...u.toObject(),
+      unreadCount: senderIdToCount[u._id.toString()] || 0,
+      lastMessageAt: userIdToLastMessageAt[u._id.toString()] || null,
+    }));
+
+    // sort by lastMessageAt desc; users with no messages go to the end
+    usersWithMeta.sort((a, b) => {
+      const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return tb - ta;
+    });
+
+    res.status(200).json(usersWithMeta);
   } catch (error) {
     console.error("Error in getUsersForSidebar: ", error.message);
     res.status(500).json({ error: "Internal server error" });
@@ -27,6 +89,12 @@ export const getMessages = async (req, res) => {
         { senderId: userToChatId, receiverId: myId },
       ],
     });
+
+    // mark messages sent by other user to me as read
+    await Message.updateMany(
+      { senderId: userToChatId, receiverId: myId, read: false },
+      { $set: { read: true, readAt: new Date() } }
+    );
 
     res.status(200).json(messages);
   } catch (error) {

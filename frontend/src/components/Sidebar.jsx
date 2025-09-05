@@ -5,14 +5,18 @@ import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { Users } from "lucide-react";
 
 const Sidebar = () => {
-  const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading } = useChatStore();
+  const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading, subscribeToMessages } = useChatStore();
 
-  const { onlineUsers } = useAuthStore();
+  const { onlineUsers, socket } = useAuthStore();
   const [showOnlineOnly, setShowOnlineOnly] = useState(false);
 
   useEffect(() => {
     getUsers();
   }, [getUsers]);
+
+  useEffect(() => {
+    if (socket) subscribeToMessages();
+  }, [socket, subscribeToMessages]);
 
   const filteredUsers = showOnlineOnly
     ? users.filter((user) => onlineUsers.includes(user._id))
@@ -64,6 +68,17 @@ const Sidebar = () => {
                   className="absolute bottom-0 right-0 size-3 bg-green-500 
                   rounded-full ring-2 ring-zinc-900"
                 />
+              )}
+              {user.unreadCount > 0 && (
+                <div
+                  className="absolute top-0 right-0 translate-x-1/4 -translate-y-1/4
+                  bg-gradient-to-r from-rose-500 to-pink-500 text-white text-[10px] font-semibold
+                  rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center text-center
+                  ring-2 ring-zinc-900 shadow-lg shadow-rose-500/30
+                  transition-transform duration-150 ease-out hover:scale-105"
+                >
+                  {user.unreadCount > 99 ? "99+" : user.unreadCount}
+                </div>
               )}
             </div>
 
